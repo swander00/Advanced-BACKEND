@@ -1,0 +1,103 @@
+| Field                         | Type                                     |
+| ----------------------------- | ---------------------------------------- |
+| ListingKey                    | text (PK, not null)                      |
+| ListPrice                     | numeric                                  |
+| ClosePrice                    | numeric                                  |
+| MlsStatus                     | text                                     |
+| ContractStatus                | text                                     |
+| StandardStatus                | text                                     |
+| TransactionType               | text                                     |
+| PropertyType                  | text                                     |
+| PropertySubType               | text                                     |
+| ArchitecturalStyle            | text[]                                   |
+| UnparsedAddress               | text                                     |
+| StreetNumber                  | text                                     |
+| StreetName                    | text                                     |
+| StreetSuffix                  | text                                     |
+| City                          | text                                     |
+| StateOrProvince               | text                                     |
+| PostalCode                    | text                                     |
+| CountyOrParish                | text                                     |
+| CityRegion                    | text                                     |
+| UnitNumber                    | text                                     |
+| KitchensAboveGrade            | integer                                  |
+| BedroomsAboveGrade            | integer                                  |
+| BedroomsBelowGrade            | integer                                  |
+| BathroomsTotalInteger         | integer                                  |
+| KitchensBelowGrade            | integer                                  |
+| KitchensTotal                 | integer                                  |
+| DenFamilyRoomYN               | text                                     |
+| PublicRemarks                 | text                                     |
+| PossessionDetails             | text                                     |
+| PhotosChangeTimestamp         | timestamp with time zone                 |
+| MediaChangeTimestamp          | timestamp with time zone                 |
+| ModificationTimestamp         | timestamp with time zone                 |
+| SystemModificationTimestamp   | timestamp with time zone                 |
+| OriginalEntryTimestamp        | timestamp with time zone                 |
+| SoldConditionalEntryTimestamp | timestamp with time zone                 |
+| SoldEntryTimestamp            | timestamp with time zone                 |
+| SuspendedEntryTimestamp       | timestamp with time zone                 |
+| TerminatedEntryTimestamp      | timestamp with time zone                 |
+| CreatedAt                     | timestamp with time zone (default now()) |
+| UpdatedAt                     | timestamp with time zone (default now()) |
+| CloseDate                     | date                                     |
+| ConditionalExpiryDate         | date                                     |
+| PurchaseContractDate          | date                                     |
+| SuspendedDate                 | date                                     |
+| TerminatedDate                | date                                     |
+| UnavailableDate               | date                                     |
+| Cooling                       | text[]                                   |
+| Sewer                         | text[]                                   |
+| Basement                      | text[]                                   |
+| BasementEntrance              | text                                     |
+| ExteriorFeatures              | text[]                                   |
+| InteriorFeatures              | text[]                                   |
+| PoolFeatures                  | text[]                                   |
+| PropertyFeatures              | text[]                                   |
+| HeatType                      | text                                     |
+| FireplaceYN                   | text                                     |
+| LivingAreaRange               | text                                     |
+| WaterfrontYN                  | text                                     |
+| PossessionType                | text                                     |
+| CoveredSpaces                 | integer                                  |
+| ParkingSpaces                 | integer                                  |
+| ParkingTotal                  | integer                                  |
+| AssociationAmenities          | text[]                                   |
+| Locker                        | text                                     |
+| BalconyType                   | text                                     |
+| PetsAllowed                   | text[]                                   |
+| AssociationFee                | numeric                                  |
+| AssociationFeeIncludes        | text[]                                   |
+| ApproximateAge                | text                                     |
+| AdditionalMonthlyFee          | numeric                                  |
+| TaxAnnualAmount               | numeric                                  |
+| TaxYear                       | integer                                  |
+| LotDepth                      | numeric                                  |
+| LotWidth                      | numeric                                  |
+| LotSizeUnits                  | text                                     |
+| Furnished                     | text                                     |
+| RentIncludes                  | text[]                                   |
+
+
+
+| Field                      | Type                                      |
+| -------------------------- | ----------------------------------------- |
+| MediaKey                   | text (PK, not null)                       |
+| ResourceRecordKey          | text (FK → Property.ListingKey, not null) |
+| MediaObjectID              | text                                      |
+| MediaURL                   | text (not null)                           |
+| MediaCategory              | text                                      |
+| MediaType                  | text                                      |
+| MediaStatus                | text                                      |
+| ImageOf                    | text                                      |
+| ClassName                  | text                                      |
+| ImageSizeDescription       | text                                      |
+| Order                      | integer                                   |
+| PreferredPhotoYN           | text                                      |
+| ShortDescription           | text                                      |
+| ResourceName               | text                                      |
+| OriginatingSystemID        | text                                      |
+| MediaModificationTimestamp | timestamp with time zone                  |
+| ModificationTimestamp      | timestamp with time zone                  |
+| CreatedAt                  | timestamp with time zone (default now())  |
+| UpdatedAt                  | timestamp with time zone (default now())  |
