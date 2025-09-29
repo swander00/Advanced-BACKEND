@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "start": "node sync-all.js",
     "sync": "node index.js",
     "sync:all": "node sync-all.js",
     "sync:idx": "node index.js --type=IDX",
@@ -12,6 +13,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0"
   }
 }
