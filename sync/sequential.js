@@ -1,249 +1,299 @@
-import { APIClient } from '../services/api.js';
-import { 
-  upsertProperty, 
-  upsertMedia, 
-  upsertRooms, 
-  upsertOpenHouse,
-  getSyncState,
-  updateSyncState,
-  completeSyncState,
-  failSyncState,
-  resetSyncState
-} from '../db/client.js';
+// ===============================================================================================
+// SEQUENTIAL SYNC ORCHESTRATOR
+// ===============================================================================================
+// Syncs Property → Media → Rooms → OpenHouse sequentially with resume support.
+// Uses cursor-based pagination (timestamp + key) with database-backed state persistence.
+// ===============================================================================================
+
+import { fetchPropertyCount, fetchPropertyBatch, fetchMedia, fetchRooms, fetchOpenHouse } from '../services/api.js';
+import { upsertProperty, upsertMedia, upsertRooms, upsertOpenHouse, getSyncState, updateSyncState } from '../db/client.js';
 import { mapProperty } from '../mappers/property.js';
 import { mapMedia } from '../mappers/media.js';
 import { mapRooms } from '../mappers/rooms.js';
 import { mapOpenHouse } from '../mappers/openhouse.js';
+import { Logger } from '../utils/logger.js';
 
-export class SequentialSync {
-  constructor() {
-    this.api = new APIClient();
-    this.stats = {
-      totalProperties: 0,
-      totalMedia: 0,
-      totalRooms: 0,
-      totalOpenHouse: 0,
-      propertiesWithMedia: 0,
-      propertiesWithRooms: 0,
-      propertiesWithOpenHouse: 0,
-      mediaCoverage: 0,
-      roomsCoverage: 0,
-      openHouseCoverage: 0
-    };
-    this.totalAvailable = 0;
-    this.currentSyncType = 'IDX';
-    this.checkpointInterval = 1000;
-  }
+// ===============================================================================================
+// [1] CONFIGURATION AND CONSTANTS
+// ===============================================================================================
 
-  formatNumber(num) {
-    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  }
+const CHECKPOINT_INTERVAL = 1000; // Save state every N properties
+const COVERAGE_REPORT_INTERVAL = 1000; // Log coverage stats every N properties
 
-  async run(options = {}) {
-    const { limit, syncType = 'IDX', reset = false } = options;
-    const batchSize = parseInt(process.env.BATCH_SIZE_PROPERTY) || 100;
-    this.currentSyncType = syncType;
+// ===============================================================================================
+// [1] END
+// ===============================================================================================
+
+
+// ===============================================================================================
+// [2] MAIN SYNC ENTRY POINT
+// ===============================================================================================
+
+export async function runSequentialSync(options = {}) {
+  const {
+    syncType = 'IDX',
+    limit = null,
+    reset = false
+  } = options;
+
+  Logger.info(`Starting ${syncType} sync${limit ? ` (limit: ${limit})` : ''}${reset ? ' (RESET MODE)' : ''}`);
+
+  try {
+    // [2.1] Load or initialize sync state
+    let state = await getSyncState(syncType);
     
-    console.log(`\nSequential ${syncType} sync starting (limit: ${limit || 'none'}, reset: ${reset})`);
-
-    try {
-      if (reset) {
-        console.log(`Resetting sync state for ${syncType}...`);
-        await resetSyncState(syncType);
-        console.log('Sync state reset complete.');
-      }
-
-      const savedState = await getSyncState(syncType);
-      console.log(`Resuming from last checkpoint:`);
-      console.log(`  Last Timestamp: ${savedState.LastTimestamp}`);
-      console.log(`  Last Key: ${savedState.LastKey}`);
-      console.log(`  Previously Processed: ${this.formatNumber(savedState.TotalProcessed)}`);
-
-      let cursor = {
-        lastTimestamp: savedState.LastTimestamp,
-        lastKey: savedState.LastKey
+    if (reset) {
+      Logger.warn('Reset flag detected - starting from SYNC_START_DATE');
+      state = {
+        SyncType: syncType,
+        LastTimestamp: process.env.SYNC_START_DATE || '2024-01-01T00:00:00Z',
+        LastKey: '0'
       };
+      await updateSyncState(state);
+    }
 
-      console.log('\nFetching total property count...');
-      this.totalAvailable = await this.api.getTotalCount(cursor, syncType);
-      console.log(`Total ${syncType} properties available: ${this.formatNumber(this.totalAvailable)}\n`);
+    Logger.info(`Resuming from: ${state.LastTimestamp} | Key: ${state.LastKey}`);
+    // [2.1] End
 
-      let processedCount = savedState.TotalProcessed || 0;
-      let batchProcessedCount = 0;
-      let recordsInCurrentWindow = 0;
-      const WINDOW_LIMIT = 95000;
+    // [2.2] Fetch total count for progress tracking
+    const totalCount = await fetchPropertyCount(syncType, state.LastTimestamp, state.LastKey);
+    Logger.info(`Total records available: ${totalCount.toLocaleString()}`);
+    // [2.2] End
 
-      while (true) {
-        const properties = await this.api.fetchProperties(cursor, batchSize, syncType);
-        
-        if (properties.length === 0) {
-          console.log('\nNo more properties found');
-          break;
-        }
+    // [2.3] Run sync loop
+    await syncLoop(syncType, state, totalCount, limit);
+    // [2.3] End
 
-        recordsInCurrentWindow += properties.length;
+    Logger.success(`${syncType} sync completed successfully`);
 
-        if (recordsInCurrentWindow >= WINDOW_LIMIT) {
-          console.log(`\n[PAGINATION] Approaching 100K limit. Resetting query window...`);
-          console.log(`[PAGINATION] Records in window: ${this.formatNumber(recordsInCurrentWindow)}`);
-          
-          const lastProperty = properties[properties.length - 1];
-          cursor.lastTimestamp = lastProperty.ModificationTimestamp;
-          cursor.lastKey = '0';
-          recordsInCurrentWindow = 0;
-          
-          console.log(`[PAGINATION] New window starts at: ${cursor.lastTimestamp}\n`);
-        }
+  } catch (error) {
+    Logger.error(`Sync failed: ${error.message}`);
+    throw error;
+  }
+}
 
-        for (const rawProperty of properties) {
-          if (limit && processedCount >= limit) {
-            console.log(`\nReached limit of ${limit} properties`);
-            break;
-          }
+// ===============================================================================================
+// [2] END
+// ===============================================================================================
 
-          processedCount++;
-          batchProcessedCount++;
-          const counts = await this.processProperty(rawProperty, processedCount);
-          
-          const index = processedCount.toString().padStart(6);
-          const total = this.formatNumber(this.totalAvailable).padStart(9);
-          const mls = counts.listingKey.padEnd(12);
-          const type = syncType.padEnd(3);
-          const media = counts.media.toString().padStart(3);
-          const rooms = counts.rooms.toString().padStart(3);
-          const openHouse = counts.openHouse.toString().padStart(3);
-          
-          console.log(
-            `#${index} / ${total} | ${mls} | ${type} | ` +
-            `Property (1) | Media (${media}) | Rooms (${rooms}) | OpenHouse (${openHouse})`
-          );
-          
-          cursor.lastTimestamp = rawProperty.ModificationTimestamp;
-          cursor.lastKey = rawProperty.ListingKey;
 
-          this.updateCoverage();
-          
-          if (batchProcessedCount >= this.checkpointInterval) {
-            await updateSyncState(syncType, cursor, processedCount);
-            console.log(`\n[CHECKPOINT] Saved progress at ${this.formatNumber(processedCount)} properties`);
-            console.log(`[CHECKPOINT] Cursor: ${cursor.lastTimestamp} | ${cursor.lastKey}`);
-            console.log(`[CHECKPOINT] Window records: ${this.formatNumber(recordsInCurrentWindow)}\n`);
-            batchProcessedCount = 0;
-          }
-          
-          if (processedCount % 1000 === 0) {
-            this.printCoverageSummary(processedCount);
-          }
-        }
+// ===============================================================================================
+// [3] MAIN SYNC LOOP
+// ===============================================================================================
 
-        if (limit && processedCount >= limit) break;
-        if (properties.length < batchSize) break;
+async function syncLoop(syncType, state, totalCount, limit) {
+  let processedCount = 0;
+  let coverageStats = {
+    mediaCount: 0,
+    roomsCount: 0,
+    openHouseCount: 0
+  };
+
+  // [3.1] Cursor tracking for infinite loop detection
+  let previousTimestamp = state.LastTimestamp;
+  let previousKey = state.LastKey;
+  let stuckCount = 0; // Track consecutive iterations without cursor movement
+  // [3.1] End
+
+  // [3.2] Main sync loop - continue until no more records
+  while (true) {
+    // [3.2.1] Check limit condition
+    if (limit && processedCount >= limit) {
+      Logger.info(`Reached limit of ${limit} properties`);
+      break;
+    }
+    // [3.2.1] End
+
+    // [3.2.2] Fetch next batch of properties
+    const batchSize = process.env.BATCH_SIZE_PROPERTY || 1000;
+    const properties = await fetchPropertyBatch(
+      syncType,
+      state.LastTimestamp,
+      state.LastKey,
+      batchSize
+    );
+    // [3.2.2] End
+
+    // [3.2.3] Check for end of data
+    if (properties.length === 0) {
+      Logger.info('No more records returned - sync complete');
+      break;
+    }
+    // [3.2.3] End
+
+    // [3.2.4] Process each property sequentially
+    for (const rawProperty of properties) {
+      processedCount++;
+
+      // Process single property with all child records
+      const childCounts = await processProperty(rawProperty, syncType);
+
+      // Update coverage stats
+      coverageStats.mediaCount += childCounts.media;
+      coverageStats.roomsCount += childCounts.rooms;
+      coverageStats.openHouseCount += childCounts.openHouse;
+
+      // Update cursor position
+      state.LastTimestamp = rawProperty.ModificationTimestamp;
+      state.LastKey = rawProperty.ListingKey;
+
+      // Log progress
+      Logger.progress(
+        processedCount,
+        totalCount,
+        rawProperty.ListingKey,
+        syncType,
+        childCounts
+      );
+
+      // Checkpoint state periodically
+      if (processedCount % CHECKPOINT_INTERVAL === 0) {
+        await updateSyncState(state);
+        Logger.info(`Checkpoint saved at ${processedCount.toLocaleString()} properties`);
       }
 
-      await updateSyncState(syncType, cursor, processedCount);
-      await completeSyncState(syncType, processedCount);
+      // Coverage report
+      if (processedCount % COVERAGE_REPORT_INTERVAL === 0) {
+        logCoverageReport(processedCount, coverageStats);
+      }
 
-      this.updateCoverage();
-      this.printFinalSummary();
-      
-      console.log(`\n[FINAL CHECKPOINT] Sync completed. State saved.`);
-      console.log(`[FINAL CHECKPOINT] Final Cursor: ${cursor.lastTimestamp} | ${cursor.lastKey}\n`);
-      
-      return this.stats;
-
-    } catch (error) {
-      await failSyncState(syncType, error.message);
-      throw error;
+      // Check limit again (mid-batch)
+      if (limit && processedCount >= limit) {
+        break;
+      }
     }
-  }
+    // [3.2.4] End
 
-  async processProperty(rawProperty, index) {
-    const property = mapProperty(rawProperty);
-    const propertyKey = property.ListingKey;
-    
-    const counts = {
-      listingKey: propertyKey,
-      media: 0,
-      rooms: 0,
-      openHouse: 0
-    };
-    
-    await upsertProperty(property);
-    this.stats.totalProperties++;
-    
+    // [3.2.5] Detect stuck cursor (infinite loop protection)
+    const lastRecord = properties[properties.length - 1];
+    const currentTimestamp = lastRecord.ModificationTimestamp;
+    const currentKey = lastRecord.ListingKey;
+
+    if (currentTimestamp === previousTimestamp && currentKey === previousKey) {
+      stuckCount++;
+      Logger.warn(`Cursor hasn't advanced (attempt ${stuckCount}/3)`);
+      
+      if (stuckCount >= 3) {
+        Logger.error('Cursor stuck for 3 iterations - stopping to prevent infinite loop');
+        break;
+      }
+    } else {
+      stuckCount = 0; // Reset counter if cursor moved
+    }
+
+    previousTimestamp = currentTimestamp;
+    previousKey = currentKey;
+    // [3.2.5] End
+  }
+  // [3.2] End
+
+  // [3.3] Final checkpoint
+  await updateSyncState(state);
+  Logger.success(`Final state saved: ${state.LastTimestamp} | ${state.LastKey}`);
+  // [3.3] End
+
+  // [3.4] Final coverage report
+  logCoverageReport(processedCount, coverageStats);
+  // [3.4] End
+}
+
+// ===============================================================================================
+// [3] END
+// ===============================================================================================
+
+
+// ===============================================================================================
+// [4] SINGLE PROPERTY PROCESSING
+// ===============================================================================================
+
+async function processProperty(rawProperty, syncType) {
+  const listingKey = rawProperty.ListingKey;
+  const childCounts = {
+    property: 0,
+    media: 0,
+    rooms: 0,
+    openHouse: 0
+  };
+
+  try {
+    // [4.1] Upsert property record
+    const mappedProperty = mapProperty(rawProperty);
+    await upsertProperty(mappedProperty);
+    childCounts.property = 1;
+    // [4.1] End
+
+    // [4.2] Fetch and upsert media
     try {
-      const rawMedia = await this.api.fetchMediaForProperty(propertyKey);
+      const rawMedia = await fetchMedia(listingKey);
       if (rawMedia.length > 0) {
         const mappedMedia = rawMedia.map(mapMedia);
         await upsertMedia(mappedMedia);
-        counts.media = mappedMedia.length;
-        this.stats.totalMedia += mappedMedia.length;
-        this.stats.propertiesWithMedia++;
+        childCounts.media = mappedMedia.length;
       }
     } catch (error) {
-      console.error(`ERROR: Media sync failed for ${propertyKey}: ${error.message}`);
+      Logger.error(`Media sync failed for ${listingKey}: ${error.message}`);
+      // Continue to rooms even if media fails
     }
-    
+    // [4.2] End
+
+    // [4.3] Fetch and upsert rooms
     try {
-      const rawRooms = await this.api.fetchRoomsForProperty(propertyKey);
+      const rawRooms = await fetchRooms(listingKey);
       if (rawRooms.length > 0) {
         const mappedRooms = rawRooms.map(mapRooms);
         await upsertRooms(mappedRooms);
-        counts.rooms = mappedRooms.length;
-        this.stats.totalRooms += mappedRooms.length;
-        this.stats.propertiesWithRooms++;
+        childCounts.rooms = mappedRooms.length;
       }
     } catch (error) {
-      console.error(`ERROR: Rooms sync failed for ${propertyKey}: ${error.message}`);
+      Logger.error(`Rooms sync failed for ${listingKey}: ${error.message}`);
+      // Continue to openhouse even if rooms fails
     }
-    
+    // [4.3] End
+
+    // [4.4] Fetch and upsert openhouse
     try {
-      const rawOpenHouse = await this.api.fetchOpenHouseForProperty(propertyKey);
-      
+      const rawOpenHouse = await fetchOpenHouse(listingKey);
       if (rawOpenHouse.length > 0) {
         const mappedOpenHouse = rawOpenHouse.map(mapOpenHouse);
         await upsertOpenHouse(mappedOpenHouse);
-        counts.openHouse = mappedOpenHouse.length;
-        this.stats.totalOpenHouse += mappedOpenHouse.length;
-        this.stats.propertiesWithOpenHouse++;
-      } else {
-        counts.openHouse = 0;
+        childCounts.openHouse = mappedOpenHouse.length;
       }
     } catch (error) {
-      console.error(`ERROR: OpenHouse sync failed for ${propertyKey}: ${error.message}`);
-      counts.openHouse = 0;
+      Logger.error(`OpenHouse sync failed for ${listingKey}: ${error.message}`);
+      // Non-fatal, continue to next property
     }
-    
-    return counts;
+    // [4.4] End
+
+  } catch (error) {
+    Logger.error(`Failed to process property ${listingKey}: ${error.message}`);
+    throw error; // Property upsert failure is fatal
   }
 
-  updateCoverage() {
-    const total = this.stats.totalProperties;
-    this.stats.mediaCoverage = total > 0 ? Math.round((this.stats.propertiesWithMedia / total) * 100) : 0;
-    this.stats.roomsCoverage = total > 0 ? Math.round((this.stats.propertiesWithRooms / total) * 100) : 0;
-    this.stats.openHouseCoverage = total > 0 ? Math.round((this.stats.propertiesWithOpenHouse / total) * 100) : 0;
-  }
-
-  printCoverageSummary(count) {
-    console.log(`\n--- Coverage after ${this.formatNumber(count)} records (${this.currentSyncType}) ---`);
-    console.log(`Properties with Property:   ${this.formatNumber(this.stats.totalProperties)}/${this.formatNumber(count)} (100%)`);
-    console.log(`Properties with Media:      ${this.formatNumber(this.stats.propertiesWithMedia)}/${this.formatNumber(count)} (${this.stats.mediaCoverage}%)`);
-    console.log(`Properties with Rooms:      ${this.formatNumber(this.stats.propertiesWithRooms)}/${this.formatNumber(count)} (${this.stats.roomsCoverage}%)`);
-    console.log(`Properties with OpenHouse:  ${this.formatNumber(this.stats.propertiesWithOpenHouse)}/${this.formatNumber(count)} (${this.stats.openHouseCoverage}%)`);
-    console.log(`---\n`);
-  }
-
-  printFinalSummary() {
-    console.log('\n========== FINAL SYNC RESULTS ==========');
-    console.log(`Total Properties Processed: ${this.formatNumber(this.stats.totalProperties)}`);
-    console.log(`Total Media Records:        ${this.formatNumber(this.stats.totalMedia)}`);
-    console.log(`Total Room Records:         ${this.formatNumber(this.stats.totalRooms)}`);
-    console.log(`Total OpenHouse Records:    ${this.formatNumber(this.stats.totalOpenHouse)}`);
-    console.log('');
-    console.log('Coverage:');
-    console.log(`  Media:      ${this.stats.mediaCoverage}% (${this.formatNumber(this.stats.propertiesWithMedia)} properties)`);
-    console.log(`  Rooms:      ${this.stats.roomsCoverage}% (${this.formatNumber(this.stats.propertiesWithRooms)} properties)`);
-    console.log(`  OpenHouse:  ${this.stats.openHouseCoverage}% (${this.formatNumber(this.stats.propertiesWithOpenHouse)} properties)`);
-    console.log('========================================\n');
-  }
+  return childCounts;
 }
+
+// ===============================================================================================
+// [4] END
+// ===============================================================================================
+
+
+// ===============================================================================================
+// [5] COVERAGE REPORTING
+// ===============================================================================================
+
+function logCoverageReport(processedCount, stats) {
+  const mediaPercent = ((stats.mediaCount / processedCount) * 100).toFixed(1);
+  const roomsPercent = ((stats.roomsCount / processedCount) * 100).toFixed(1);
+  const openHousePercent = ((stats.openHouseCount / processedCount) * 100).toFixed(1);
+
+  Logger.info('─'.repeat(80));
+  Logger.info(`Coverage Report (${processedCount.toLocaleString()} properties processed)`);
+  Logger.info(`  Media:      ${stats.mediaCount.toLocaleString()} records (${mediaPercent}% coverage)`);
+  Logger.info(`  Rooms:      ${stats.roomsCount.toLocaleString()} records (${roomsPercent}% coverage)`);
+  Logger.info(`  OpenHouse:  ${stats.openHouseCount.toLocaleString()} records (${openHousePercent}% coverage)`);
+  Logger.info('─'.repeat(80));
+}
+
+// ===============================================================================================
+// [5] END
+// ===============================================================================================

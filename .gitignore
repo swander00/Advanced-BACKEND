@@ -1,6 +1,2 @@
-node_modules/
-logs/
-.env
-environment.env
-*.log
-.DS_Store
+trreb-dashboard/ 
+node_modules/ 

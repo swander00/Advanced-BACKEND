@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import { SequentialSync } from './sync/sequential.js';
 import { parseArgs } from './utils/args.js';
+import { fetchPropertyCount } from './services/api.js';
 
 dotenv.config({ path: './environment.env' });
 
@@ -14,13 +15,25 @@ async function main() {
   const totalStart = Date.now();
   
   try {
-    // Sync IDX
+    // [1] Fetch counts for both IDX and VOW upfront
+    console.log('>>> Fetching total counts...\n');
+    
+    const idxCount = await fetchPropertyCount('IDX', '2024-01-01T00:00:00Z', '0');
+    const vowCount = await fetchPropertyCount('VOW', '2024-01-01T00:00:00Z', '0');
+    const totalCount = idxCount + vowCount;
+    
+    console.log(`IDX Properties: ${idxCount.toLocaleString()}`);
+    console.log(`VOW Properties: ${vowCount.toLocaleString()}`);
+    console.log(`TOTAL Properties: ${totalCount.toLocaleString()}\n`);
+    
+    // [2] Sync IDX
     console.log('>>> Starting IDX Sync...\n');
     const idxSync = new SequentialSync();
     const idxResults = await idxSync.run({
       limit: args.limit,
       syncType: 'IDX',
-      reset: args.reset
+      reset: args.reset,
+      totalExpected: idxCount // Pass to sync for progress tracking
     });
     
     console.log('\n>>> IDX Sync Complete!');
@@ -29,13 +42,14 @@ async function main() {
     console.log(`    Rooms: ${idxResults.totalRooms}`);
     console.log(`    OpenHouse: ${idxResults.totalOpenHouse}\n`);
     
-    // Sync VOW
+    // [3] Sync VOW
     console.log('>>> Starting VOW Sync...\n');
     const vowSync = new SequentialSync();
     const vowResults = await vowSync.run({
       limit: args.limit,
       syncType: 'VOW',
-      reset: args.reset
+      reset: args.reset,
+      totalExpected: vowCount // Pass to sync for progress tracking
     });
     
     console.log('\n>>> VOW Sync Complete!');
@@ -44,7 +58,7 @@ async function main() {
     console.log(`    Rooms: ${vowResults.totalRooms}`);
     console.log(`    OpenHouse: ${vowResults.totalOpenHouse}\n`);
     
-    // Combined summary
+    // [4] Combined summary
     const totalProperties = idxResults.totalProperties + vowResults.totalProperties;
     const totalMedia = idxResults.totalMedia + vowResults.totalMedia;
     const totalRooms = idxResults.totalRooms + vowResults.totalRooms;
@@ -64,7 +78,7 @@ async function main() {
     console.log('SUCCESS: All syncs completed!');
     
   } catch (error) {
-    console.error('\n❌ SYNC FAILED');
+    console.error('\nSYNC FAILED');
     console.error(error.message);
     if (error.stack) console.error(error.stack);
     process.exit(1);
