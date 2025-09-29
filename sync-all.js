@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { SequentialSync } from './sync/sequential.js';
+import { runSequentialSync } from './sync/sequential.js';
 import { parseArgs } from './utils/args.js';
 import { fetchPropertyCount } from './services/api.js';
 
@@ -28,51 +28,30 @@ async function main() {
     
     // [2] Sync IDX
     console.log('>>> Starting IDX Sync...\n');
-    const idxSync = new SequentialSync();
-    const idxResults = await idxSync.run({
+    await runSequentialSync({
       limit: args.limit,
       syncType: 'IDX',
-      reset: args.reset,
-      totalExpected: idxCount // Pass to sync for progress tracking
+      reset: args.reset
     });
     
-    console.log('\n>>> IDX Sync Complete!');
-    console.log(`    Properties: ${idxResults.totalProperties}`);
-    console.log(`    Media: ${idxResults.totalMedia}`);
-    console.log(`    Rooms: ${idxResults.totalRooms}`);
-    console.log(`    OpenHouse: ${idxResults.totalOpenHouse}\n`);
+    console.log('\n>>> IDX Sync Complete!\n');
     
     // [3] Sync VOW
     console.log('>>> Starting VOW Sync...\n');
-    const vowSync = new SequentialSync();
-    const vowResults = await vowSync.run({
+    await runSequentialSync({
       limit: args.limit,
       syncType: 'VOW',
-      reset: args.reset,
-      totalExpected: vowCount // Pass to sync for progress tracking
+      reset: args.reset
     });
     
-    console.log('\n>>> VOW Sync Complete!');
-    console.log(`    Properties: ${vowResults.totalProperties}`);
-    console.log(`    Media: ${vowResults.totalMedia}`);
-    console.log(`    Rooms: ${vowResults.totalRooms}`);
-    console.log(`    OpenHouse: ${vowResults.totalOpenHouse}\n`);
+    console.log('\n>>> VOW Sync Complete!\n');
     
-    // [4] Combined summary
-    const totalProperties = idxResults.totalProperties + vowResults.totalProperties;
-    const totalMedia = idxResults.totalMedia + vowResults.totalMedia;
-    const totalRooms = idxResults.totalRooms + vowResults.totalRooms;
-    const totalOpenHouse = idxResults.totalOpenHouse + vowResults.totalOpenHouse;
     const totalTime = ((Date.now() - totalStart) / 1000 / 60).toFixed(2);
     
     console.log('========================================');
-    console.log('COMBINED SYNC RESULTS');
+    console.log('COMBINED SYNC COMPLETE');
     console.log('========================================');
-    console.log(`Total Properties: ${totalProperties.toLocaleString()}`);
-    console.log(`Total Media:      ${totalMedia.toLocaleString()}`);
-    console.log(`Total Rooms:      ${totalRooms.toLocaleString()}`);
-    console.log(`Total OpenHouse:  ${totalOpenHouse.toLocaleString()}`);
-    console.log(`Total Time:       ${totalTime} minutes`);
+    console.log(`Total Time: ${totalTime} minutes`);
     console.log('========================================\n');
     
     console.log('SUCCESS: All syncs completed!');
