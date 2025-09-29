@@ -2,7 +2,7 @@
 -- TRREB RESO Data Sync Schema
 -- ===============================================================
 -- Comprehensive schema for syncing TRREB real estate data
--- Includes Property, Media, PropertyRooms, and OpenHouse tables
+-- Includes Property, Media, PropertyRooms, OpenHouse, and SyncState tables
 -- Designed for incremental sync, efficient querying, and modularity
 -- All tables and columns use PascalCase to match RESO feed exactly
 
@@ -13,6 +13,7 @@ DROP TABLE IF EXISTS "Media" CASCADE;
 DROP TABLE IF EXISTS "PropertyRooms" CASCADE;
 DROP TABLE IF EXISTS "OpenHouse" CASCADE;
 DROP TABLE IF EXISTS "Property" CASCADE;
+DROP TABLE IF EXISTS "SyncState" CASCADE;
 
 -- ===============================================================
 -- Property Table
@@ -48,7 +49,7 @@ CREATE TABLE "Property" (
     "CityRegion" TEXT,
     "UnitNumber" TEXT,
 
-    -- Room Counts (now NUMERIC for flexibility)
+    -- Room Counts (NUMERIC for flexibility)
     "KitchensAboveGrade" NUMERIC,
     "BedroomsAboveGrade" NUMERIC,
     "BedroomsBelowGrade" NUMERIC,
@@ -94,7 +95,7 @@ CREATE TABLE "Property" (
     "LivingAreaRange" TEXT,
     "WaterfrontYN" TEXT,
 
-    -- Possession & Parking (converted to NUMERIC)
+    -- Possession & Parking
     "PossessionType" TEXT,
     "CoveredSpaces" NUMERIC,
     "ParkingSpaces" NUMERIC,
@@ -216,6 +217,28 @@ CREATE TABLE "OpenHouse" (
 );
 
 -- ===============================================================
+-- SyncState Table (Resume-Friendly Backfill)
+-- ===============================================================
+CREATE TABLE "SyncState" (
+    "SyncType" TEXT PRIMARY KEY NOT NULL,
+    "LastTimestamp" TIMESTAMPTZ NOT NULL,
+    "LastKey" TEXT NOT NULL,
+    "TotalProcessed" INTEGER DEFAULT 0,
+    "LastRunStarted" TIMESTAMPTZ,
+    "LastRunCompleted" TIMESTAMPTZ,
+    "Status" TEXT DEFAULT 'idle',
+    "CreatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    "UpdatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- Initialize Default SyncState Rows
+INSERT INTO "SyncState" ("SyncType", "LastTimestamp", "LastKey")
+VALUES 
+    ('IDX', '2024-01-01T00:00:00Z', '0'),
+    ('VOW', '2024-01-01T00:00:00Z', '0')
+ON CONFLICT ("SyncType") DO NOTHING;
+
+-- ===============================================================
 -- Indexes
 -- ===============================================================
 CREATE INDEX "idx_property_modification_listing" ON "Property"("ModificationTimestamp","ListingKey");
@@ -270,6 +293,9 @@ FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER "update_openhouse_updated_at" BEFORE UPDATE ON "OpenHouse"
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+CREATE TRIGGER "update_syncstate_updated_at" BEFORE UPDATE ON "SyncState"
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- ===============================================================
 -- Comments
 -- ===============================================================
@@ -277,3 +303,7 @@ COMMENT ON TABLE "Property" IS 'Real estate property listings from TRREB RESO We
 COMMENT ON TABLE "Media" IS 'Media files associated with properties via ResourceRecordKey';
 COMMENT ON TABLE "PropertyRooms" IS 'Room details for properties, linked via ListingKey';
 COMMENT ON TABLE "OpenHouse" IS 'Open house schedules for properties, linked via ListingKey';
+COMMENT ON TABLE "SyncState" IS 'Tracks sync progress for resume support';
+COMMENT ON COLUMN "SyncState"."SyncType" IS 'IDX, VOW, IDX_INCREMENTAL, etc.';
+COMMENT ON COLUMN "SyncState"."LastTimestamp" IS 'Last ModificationTimestamp processed';
+COMMENT ON COLUMN "SyncState"."LastKey" IS 'Last ListingKey processed at that timestamp';

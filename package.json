@@ -4,10 +4,14 @@
   "type": "module",
   "scripts": {
     "sync": "node index.js",
+    "sync:all": "node sync-all.js",
+    "sync:idx": "node index.js --type=IDX",
+    "sync:vow": "node index.js --type=VOW",
+    "sync:reset": "node sync-all.js --reset",
     "test": "node index.js --limit=50"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
-    "dotenv": "^16.6.1"
+    "dotenv": "^16.4.5"
   }
 }
