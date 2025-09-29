@@ -1,27 +1,29 @@
 import dotenv from 'dotenv';
 import { SequentialSync } from './sync/sequential.js';
 import { parseArgs } from './utils/args.js';
-import { Logger } from './utils/logger.js';
 
 dotenv.config({ path: './environment.env' });
 
 async function main() {
   const args = parseArgs();
   
-  Logger.info(`TRREB Sequential Sync Starting (${args.limit ? `limit: ${args.limit}` : 'full sync'})`);
+  console.log(`TRREB Sequential Sync Starting`);
+  console.log(`Mode: ${args.syncType} | Limit: ${args.limit || 'none'}\n`);
 
   try {
     const sync = new SequentialSync();
     const results = await sync.run(args);
     
-    if (results.coverage >= 95) {
-      Logger.info('SUCCESS: Excellent media coverage achieved!');
+    if (results.mediaCoverage >= 95) {
+      console.log('SUCCESS: Excellent media coverage achieved!');
     } else {
-      Logger.info('WARNING: Media coverage below 95%');
+      console.log('WARNING: Media coverage below 95%');
     }
     
   } catch (error) {
-    Logger.error('Sync failed', error);
+    console.error('\nERROR: Sync failed');
+    console.error(error.message);
+    if (error.stack) console.error(error.stack);
     process.exit(1);
   }
 }

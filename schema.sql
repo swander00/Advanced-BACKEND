@@ -1,39 +1,41 @@
--- ===============================
+-- ===============================================================
 -- TRREB RESO Data Sync Schema
--- ===============================
+-- ===============================================================
 -- Comprehensive schema for syncing TRREB real estate data
--- Supports Property and Media tables with proper relationships
--- Designed for incremental sync and efficient querying
+-- Includes Property, Media, PropertyRooms, and OpenHouse tables
+-- Designed for incremental sync, efficient querying, and modularity
 -- All tables and columns use PascalCase to match RESO feed exactly
 
--- Drop existing tables in correct order (children first)
+-- ===============================================================
+-- Drop Existing Tables (Child Tables First)
+-- ===============================================================
 DROP TABLE IF EXISTS "Media" CASCADE;
+DROP TABLE IF EXISTS "PropertyRooms" CASCADE;
+DROP TABLE IF EXISTS "OpenHouse" CASCADE;
 DROP TABLE IF EXISTS "Property" CASCADE;
 
--- ===============================
+-- ===============================================================
 -- Property Table
--- ===============================
--- Stores real estate listing data from TRREB RESO Web API
--- Primary entity for all property-related information
+-- ===============================================================
 CREATE TABLE "Property" (
     -- Primary Key & Identifiers
     "ListingKey" TEXT PRIMARY KEY NOT NULL,
-    
+
     -- Pricing Information
     "ListPrice" NUMERIC,
     "ClosePrice" NUMERIC,
-    
+
     -- Status Fields
     "MlsStatus" TEXT,
     "ContractStatus" TEXT,
     "StandardStatus" TEXT,
     "TransactionType" TEXT,
-    
+
     -- Property Classification
     "PropertyType" TEXT,
     "PropertySubType" TEXT,
     "ArchitecturalStyle" TEXT[],
-    
+
     -- Address Components
     "UnparsedAddress" TEXT,
     "StreetNumber" TEXT,
@@ -45,21 +47,21 @@ CREATE TABLE "Property" (
     "CountyOrParish" TEXT,
     "CityRegion" TEXT,
     "UnitNumber" TEXT,
-    
-    -- Room Counts
-    "KitchensAboveGrade" INTEGER,
-    "BedroomsAboveGrade" INTEGER,
-    "BedroomsBelowGrade" INTEGER,
-    "BathroomsTotalInteger" INTEGER,
-    "KitchensBelowGrade" INTEGER,
-    "KitchensTotal" INTEGER,
+
+    -- Room Counts (now NUMERIC for flexibility)
+    "KitchensAboveGrade" NUMERIC,
+    "BedroomsAboveGrade" NUMERIC,
+    "BedroomsBelowGrade" NUMERIC,
+    "BathroomsTotalInteger" NUMERIC,
+    "KitchensBelowGrade" NUMERIC,
+    "KitchensTotal" NUMERIC,
     "DenFamilyRoomYN" TEXT,
-    
+
     -- Property Description
     "PublicRemarks" TEXT,
     "PossessionDetails" TEXT,
-    
-    -- Timestamp Fields (for sync tracking)
+
+    -- Timestamp Fields
     "PhotosChangeTimestamp" TIMESTAMPTZ,
     "MediaChangeTimestamp" TIMESTAMPTZ,
     "ModificationTimestamp" TIMESTAMPTZ,
@@ -69,7 +71,7 @@ CREATE TABLE "Property" (
     "SoldEntryTimestamp" TIMESTAMPTZ,
     "SuspendedEntryTimestamp" TIMESTAMPTZ,
     "TerminatedEntryTimestamp" TIMESTAMPTZ,
-    
+
     -- Date Fields
     "CloseDate" DATE,
     "ConditionalExpiryDate" DATE,
@@ -77,8 +79,8 @@ CREATE TABLE "Property" (
     "SuspendedDate" DATE,
     "TerminatedDate" DATE,
     "UnavailableDate" DATE,
-    
-    -- Property Features (Arrays for multiple values)
+
+    -- Property Features
     "Cooling" TEXT[],
     "Sewer" TEXT[],
     "Basement" TEXT[],
@@ -91,14 +93,14 @@ CREATE TABLE "Property" (
     "FireplaceYN" TEXT,
     "LivingAreaRange" TEXT,
     "WaterfrontYN" TEXT,
-    
-    -- Possession & Parking
+
+    -- Possession & Parking (converted to NUMERIC)
     "PossessionType" TEXT,
-    "CoveredSpaces" INTEGER,
-    "ParkingSpaces" INTEGER,
-    "ParkingTotal" INTEGER,
-    
-    -- Condo/Association Information
+    "CoveredSpaces" NUMERIC,
+    "ParkingSpaces" NUMERIC,
+    "ParkingTotal" NUMERIC,
+
+    -- Condo/Association Info
     "AssociationAmenities" TEXT[],
     "Locker" TEXT,
     "BalconyType" TEXT,
@@ -107,173 +109,171 @@ CREATE TABLE "Property" (
     "AssociationFeeIncludes" TEXT[],
     "ApproximateAge" TEXT,
     "AdditionalMonthlyFee" NUMERIC,
-    
+
     -- Tax & Lot Information
     "TaxAnnualAmount" NUMERIC,
     "TaxYear" INTEGER,
     "LotDepth" NUMERIC,
     "LotWidth" NUMERIC,
     "LotSizeUnits" TEXT,
-    
+
     -- Rental Information
     "Furnished" TEXT,
     "RentIncludes" TEXT[],
-    
+
     -- Audit Fields
     "CreatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL,
     "UpdatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
--- ===============================
+-- ===============================================================
 -- Media Table
--- ===============================
--- Stores media files (images, videos) associated with properties
--- Linked to Property via ResourceRecordKey -> ListingKey
+-- ===============================================================
 CREATE TABLE "Media" (
-    -- Primary Key & Relationships
     "MediaKey" TEXT PRIMARY KEY NOT NULL,
     "ResourceRecordKey" TEXT NOT NULL,
-    
-    -- Media Identification
+
     "MediaObjectID" TEXT,
     "MediaURL" TEXT NOT NULL,
-    
-    -- Media Classification
+
     "MediaCategory" TEXT,
     "MediaType" TEXT,
     "MediaStatus" TEXT,
     "ImageOf" TEXT,
     "ClassName" TEXT,
     "ImageSizeDescription" TEXT,
-    
-    -- Display Properties
+
     "Order" INTEGER,
     "PreferredPhotoYN" TEXT,
     "ShortDescription" TEXT,
-    
-    -- System Fields
+
     "ResourceName" TEXT,
     "OriginatingSystemID" TEXT,
-    
-    -- Timestamp Fields
+
     "MediaModificationTimestamp" TIMESTAMPTZ,
     "ModificationTimestamp" TIMESTAMPTZ,
-    
-    -- Audit Fields
+
     "CreatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-    "UpdatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL
+    "UpdatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+
+    CONSTRAINT "fk_media_property"
+        FOREIGN KEY ("ResourceRecordKey")
+        REFERENCES "Property"("ListingKey")
+        ON DELETE CASCADE
 );
 
--- ===============================
--- Foreign Key Constraints
--- ===============================
-ALTER TABLE "Media" 
-ADD CONSTRAINT "fk_media_property" 
-FOREIGN KEY ("ResourceRecordKey") 
-REFERENCES "Property"("ListingKey") 
-ON DELETE CASCADE;
+-- ===============================================================
+-- PropertyRooms Table
+-- ===============================================================
+CREATE TABLE "PropertyRooms" (
+    "RoomKey" TEXT PRIMARY KEY NOT NULL,
+    "ListingKey" TEXT NOT NULL,
 
--- ===============================
--- Drop Existing Indexes (for idempotent execution)
--- ===============================
-DROP INDEX IF EXISTS "idx_property_modification_listing";
-DROP INDEX IF EXISTS "idx_property_contract_status";
-DROP INDEX IF EXISTS "idx_property_property_type";
-DROP INDEX IF EXISTS "idx_property_city";
-DROP INDEX IF EXISTS "idx_property_postal_code";
-DROP INDEX IF EXISTS "idx_property_list_price";
-DROP INDEX IF EXISTS "idx_property_mls_status";
-DROP INDEX IF EXISTS "idx_property_original_entry";
-DROP INDEX IF EXISTS "idx_media_modification_key";
-DROP INDEX IF EXISTS "idx_media_resource_record_key";
-DROP INDEX IF EXISTS "idx_media_size_description";
-DROP INDEX IF EXISTS "idx_media_resource_order";
-DROP INDEX IF EXISTS "idx_media_preferred_photo";
+    "RoomType" TEXT,
+    "RoomLevel" TEXT,
+    "RoomLength" NUMERIC,
+    "RoomWidth" NUMERIC,
+    "RoomDescription" TEXT,
+    "RoomFeatures" TEXT[],
+    "RoomDimensions" TEXT,
 
--- ===============================
--- Indexes for Performance
--- ===============================
+    "ModificationTimestamp" TIMESTAMPTZ,
 
--- Property Table Indexes
-CREATE INDEX "idx_property_modification_listing" 
-ON "Property"("ModificationTimestamp", "ListingKey");
+    "CreatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    "UpdatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL,
 
-CREATE INDEX "idx_property_contract_status" 
-ON "Property"("ContractStatus");
+    CONSTRAINT "fk_rooms_property"
+        FOREIGN KEY ("ListingKey")
+        REFERENCES "Property"("ListingKey")
+        ON DELETE CASCADE
+);
 
-CREATE INDEX "idx_property_property_type" 
-ON "Property"("PropertyType");
+-- ===============================================================
+-- OpenHouse Table
+-- ===============================================================
+CREATE TABLE "OpenHouse" (
+    "OpenHouseKey" TEXT PRIMARY KEY NOT NULL,
+    "ListingKey" TEXT NOT NULL,
 
-CREATE INDEX "idx_property_city" 
-ON "Property"("City");
+    "OpenHouseDate" DATE,
+    "OpenHouseStartTime" TIME,
+    "OpenHouseEndTime" TIME,
+    "OpenHouseRemarks" TEXT,
+    "OpenHouseStatus" TEXT,
+    "OpenHouseType" TEXT,
+    "ShowingAgentKey" TEXT,
+    "ShowingAgentKeyNumeric" INTEGER,
 
-CREATE INDEX "idx_property_postal_code" 
-ON "Property"("PostalCode");
+    "ModificationTimestamp" TIMESTAMPTZ,
 
-CREATE INDEX "idx_property_list_price" 
-ON "Property"("ListPrice") 
-WHERE "ListPrice" IS NOT NULL;
+    "CreatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    "UpdatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL,
 
-CREATE INDEX "idx_property_mls_status" 
-ON "Property"("MlsStatus");
+    CONSTRAINT "fk_openhouse_property"
+        FOREIGN KEY ("ListingKey")
+        REFERENCES "Property"("ListingKey")
+        ON DELETE CASCADE
+);
 
-CREATE INDEX "idx_property_original_entry" 
-ON "Property"("OriginalEntryTimestamp");
+-- ===============================================================
+-- Indexes
+-- ===============================================================
+CREATE INDEX "idx_property_modification_listing" ON "Property"("ModificationTimestamp","ListingKey");
+CREATE INDEX "idx_property_contract_status" ON "Property"("ContractStatus");
+CREATE INDEX "idx_property_property_type" ON "Property"("PropertyType");
+CREATE INDEX "idx_property_city" ON "Property"("City");
+CREATE INDEX "idx_property_postal_code" ON "Property"("PostalCode");
+CREATE INDEX "idx_property_list_price" ON "Property"("ListPrice") WHERE "ListPrice" IS NOT NULL;
+CREATE INDEX "idx_property_mls_status" ON "Property"("MlsStatus");
+CREATE INDEX "idx_property_original_entry" ON "Property"("OriginalEntryTimestamp");
 
--- Media Table Indexes
-CREATE INDEX "idx_media_modification_key" 
-ON "Media"("ModificationTimestamp", "MediaKey");
+CREATE INDEX "idx_media_modification_key" ON "Media"("ModificationTimestamp","MediaKey");
+CREATE INDEX "idx_media_resource_record_key" ON "Media"("ResourceRecordKey");
+CREATE INDEX "idx_media_size_description" ON "Media"("ImageSizeDescription");
+CREATE INDEX "idx_media_resource_order" ON "Media"("ResourceRecordKey","Order");
+CREATE INDEX "idx_media_preferred_photo" ON "Media"("ResourceRecordKey","PreferredPhotoYN") WHERE "PreferredPhotoYN"='Y';
 
-CREATE INDEX "idx_media_resource_record_key" 
-ON "Media"("ResourceRecordKey");
+CREATE INDEX "idx_rooms_listing_key" ON "PropertyRooms"("ListingKey");
+CREATE INDEX "idx_rooms_modification" ON "PropertyRooms"("ModificationTimestamp");
+CREATE INDEX "idx_rooms_type" ON "PropertyRooms"("RoomType");
 
-CREATE INDEX "idx_media_size_description" 
-ON "Media"("ImageSizeDescription");
+CREATE INDEX "idx_openhouse_listing_key" ON "OpenHouse"("ListingKey");
+CREATE INDEX "idx_openhouse_date" ON "OpenHouse"("OpenHouseDate");
+CREATE INDEX "idx_openhouse_modification" ON "OpenHouse"("ModificationTimestamp");
+CREATE INDEX "idx_openhouse_status" ON "OpenHouse"("OpenHouseStatus");
 
-CREATE INDEX "idx_media_resource_order" 
-ON "Media"("ResourceRecordKey", "Order");
-
-CREATE INDEX "idx_media_preferred_photo" 
-ON "Media"("ResourceRecordKey", "PreferredPhotoYN") 
-WHERE "PreferredPhotoYN" = 'Y';
-
--- ===============================
--- UpdatedAt Trigger Function
--- ===============================
+-- ===============================================================
+-- Trigger Function
+-- ===============================================================
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER
 LANGUAGE plpgsql
-AS $function$
+AS $$
 BEGIN
-    NEW."UpdatedAt" = NOW();
-    RETURN NEW;
+  NEW."UpdatedAt" = NOW();
+  RETURN NEW;
 END;
-$function$;
+$$;
 
--- ===============================
--- UpdatedAt Triggers
--- ===============================
-CREATE TRIGGER "update_property_updated_at" 
-BEFORE UPDATE ON "Property" 
-FOR EACH ROW 
-EXECUTE FUNCTION update_updated_at_column();
+-- ===============================================================
+-- Triggers
+-- ===============================================================
+CREATE TRIGGER "update_property_updated_at" BEFORE UPDATE ON "Property"
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER "update_media_updated_at" 
-BEFORE UPDATE ON "Media" 
-FOR EACH ROW 
-EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER "update_media_updated_at" BEFORE UPDATE ON "Media"
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- ===============================
--- Comments for Documentation
--- ===============================
+CREATE TRIGGER "update_rooms_updated_at" BEFORE UPDATE ON "PropertyRooms"
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER "update_openhouse_updated_at" BEFORE UPDATE ON "OpenHouse"
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ===============================================================
+-- Comments
+-- ===============================================================
 COMMENT ON TABLE "Property" IS 'Real estate property listings from TRREB RESO Web API';
 COMMENT ON TABLE "Media" IS 'Media files associated with properties via ResourceRecordKey';
-
-COMMENT ON COLUMN "Property"."ListingKey" IS 'Primary key - unique listing identifier';
-COMMENT ON COLUMN "Property"."ModificationTimestamp" IS 'Critical for incremental sync';
-COMMENT ON COLUMN "Property"."ContractStatus" IS 'Available, Sold, Conditional, etc.';
-
-COMMENT ON COLUMN "Media"."MediaKey" IS 'Primary key - unique media identifier';
-COMMENT ON COLUMN "Media"."ResourceRecordKey" IS 'Foreign key to Property.ListingKey';
-COMMENT ON COLUMN "Media"."ImageSizeDescription" IS 'Thumbnail, Medium, Largest';
-COMMENT ON COLUMN "Media"."Order" IS 'Display sequence for property galleries';
+COMMENT ON TABLE "PropertyRooms" IS 'Room details for properties, linked via ListingKey';
+COMMENT ON TABLE "OpenHouse" IS 'Open house schedules for properties, linked via ListingKey';

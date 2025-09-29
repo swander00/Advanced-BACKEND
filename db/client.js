@@ -47,3 +47,41 @@ export async function upsertMedia(mediaRecords) {
   
   return mediaRecords.length;
 }
+
+export async function upsertRooms(roomRecords) {
+  if (roomRecords.length === 0) return 0;
+  
+  const db = initDB();
+  
+  const { error } = await db
+    .from('PropertyRooms')
+    .upsert(roomRecords, { 
+      onConflict: 'RoomKey',
+      ignoreDuplicates: false 
+    });
+    
+  if (error) {
+    throw new Error(`Rooms upsert failed: ${error.message}`);
+  }
+  
+  return roomRecords.length;
+}
+
+export async function upsertOpenHouse(openHouseRecords) {
+  if (openHouseRecords.length === 0) return 0;
+  
+  const db = initDB();
+  
+  const { error } = await db
+    .from('OpenHouse')
+    .upsert(openHouseRecords, { 
+      onConflict: 'OpenHouseKey',
+      ignoreDuplicates: false 
+    });
+    
+  if (error) {
+    throw new Error(`OpenHouse upsert failed: ${error.message}`);
+  }
+  
+  return openHouseRecords.length;
+}
