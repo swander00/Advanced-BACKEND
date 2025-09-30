@@ -1,7 +1,17 @@
+// ===============================================================================================
+// DATABASE CLIENT
+// ===============================================================================================
+// Handles all Supabase database operations with retry logic and state management
+// ===============================================================================================
+
 import { createClient } from '@supabase/supabase-js';
 import { Logger } from '../utils/logger.js';
 
 let supabase = null;
+
+// ===============================================================================================
+// [1] DATABASE INITIALIZATION
+// ===============================================================================================
 
 export function initDB() {
   if (!supabase) {
@@ -14,7 +24,15 @@ export function initDB() {
   return supabase;
 }
 
-// Helper function for retries
+// ===============================================================================================
+// [1] END
+// ===============================================================================================
+
+
+// ===============================================================================================
+// [2] RETRY HELPER
+// ===============================================================================================
+
 async function retryOperation(operation, maxRetries = 3, delayMs = 1000) {
   let lastError;
   
@@ -26,13 +44,24 @@ async function retryOperation(operation, maxRetries = 3, delayMs = 1000) {
       
       if (attempt < maxRetries) {
         console.log(`[RETRY] Attempt ${attempt}/${maxRetries} failed. Retrying in ${delayMs}ms...`);
+        console.log(`[RETRY] Error: ${error.message}`);
         await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
       }
     }
   }
   
+  console.error(`[RETRY] All ${maxRetries} attempts failed. Last error: ${lastError.message}`);
   throw lastError;
 }
+
+// ===============================================================================================
+// [2] END
+// ===============================================================================================
+
+
+// ===============================================================================================
+// [3] PROPERTY UPSERT
+// ===============================================================================================
 
 export async function upsertProperty(property) {
   return await retryOperation(async () => {
@@ -50,6 +79,15 @@ export async function upsertProperty(property) {
     }
   });
 }
+
+// ===============================================================================================
+// [3] END
+// ===============================================================================================
+
+
+// ===============================================================================================
+// [4] MEDIA UPSERT
+// ===============================================================================================
 
 export async function upsertMedia(mediaRecords) {
   if (mediaRecords.length === 0) return 0;
@@ -72,6 +110,15 @@ export async function upsertMedia(mediaRecords) {
   });
 }
 
+// ===============================================================================================
+// [4] END
+// ===============================================================================================
+
+
+// ===============================================================================================
+// [5] ROOMS UPSERT
+// ===============================================================================================
+
 export async function upsertRooms(roomRecords) {
   if (roomRecords.length === 0) return 0;
   
@@ -92,6 +139,15 @@ export async function upsertRooms(roomRecords) {
     return roomRecords.length;
   });
 }
+
+// ===============================================================================================
+// [5] END
+// ===============================================================================================
+
+
+// ===============================================================================================
+// [6] OPENHOUSE UPSERT
+// ===============================================================================================
 
 export async function upsertOpenHouse(openHouseRecords) {
   if (openHouseRecords.length === 0) return 0;
@@ -114,10 +170,16 @@ export async function upsertOpenHouse(openHouseRecords) {
   });
 }
 
-// ===============================
-// Sync State Management
-// ===============================
+// ===============================================================================================
+// [6] END
+// ===============================================================================================
 
+
+// ===============================================================================================
+// [7] SYNC STATE MANAGEMENT
+// ===============================================================================================
+
+// [7.1] Get Sync State
 export async function getSyncState(syncType) {
   return await retryOperation(async () => {
     const db = initDB();
@@ -131,6 +193,7 @@ export async function getSyncState(syncType) {
     if (error) {
       if (error.code === 'PGRST116') {
         return {
+          SyncType: syncType,
           LastTimestamp: process.env.SYNC_START_DATE || '2024-01-01T00:00:00Z',
           LastKey: '0',
           TotalProcessed: 0
@@ -142,20 +205,20 @@ export async function getSyncState(syncType) {
     return data;
   });
 }
+// [7.1] End
 
-export async function updateSyncState(syncType, cursor, totalProcessed) {
+// [7.2] Update Sync State - FIXED to accept state object with PascalCase
+export async function updateSyncState(state) {
   return await retryOperation(async () => {
     const db = initDB();
     
     const { error } = await db
       .from('SyncState')
       .upsert({
-        SyncType: syncType,
-        LastTimestamp: cursor.lastTimestamp,
-        LastKey: cursor.lastKey,
-        TotalProcessed: totalProcessed,
-        Status: 'running',
-        LastRunStarted: new Date().toISOString()
+        SyncType: state.SyncType,
+        LastTimestamp: state.LastTimestamp,
+        LastKey: state.LastKey,
+        UpdatedAt: new Date().toISOString()
       }, {
         onConflict: 'SyncType'
       });
@@ -165,7 +228,9 @@ export async function updateSyncState(syncType, cursor, totalProcessed) {
     }
   });
 }
+// [7.2] End
 
+// [7.3] Complete Sync State
 export async function completeSyncState(syncType, totalProcessed) {
   return await retryOperation(async () => {
     const db = initDB();
@@ -175,7 +240,8 @@ export async function completeSyncState(syncType, totalProcessed) {
       .update({
         TotalProcessed: totalProcessed,
         Status: 'completed',
-        LastRunCompleted: new Date().toISOString()
+        LastRunCompleted: new Date().toISOString(),
+        UpdatedAt: new Date().toISOString()
       })
       .eq('SyncType', syncType);
     
@@ -184,7 +250,9 @@ export async function completeSyncState(syncType, totalProcessed) {
     }
   });
 }
+// [7.3] End
 
+// [7.4] Fail Sync State
 export async function failSyncState(syncType, errorMessage) {
   try {
     await retryOperation(async () => {
@@ -194,7 +262,8 @@ export async function failSyncState(syncType, errorMessage) {
         .from('SyncState')
         .update({
           Status: 'failed',
-          LastRunCompleted: new Date().toISOString()
+          LastRunCompleted: new Date().toISOString(),
+          UpdatedAt: new Date().toISOString()
         })
         .eq('SyncType', syncType);
       
@@ -206,7 +275,9 @@ export async function failSyncState(syncType, errorMessage) {
     console.error(`Failed to update failed sync state: ${error.message}`);
   }
 }
+// [7.4] End
 
+// [7.5] Reset Sync State
 export async function resetSyncState(syncType) {
   return await retryOperation(async () => {
     const db = initDB();
@@ -220,7 +291,8 @@ export async function resetSyncState(syncType) {
         TotalProcessed: 0,
         Status: 'idle',
         LastRunStarted: null,
-        LastRunCompleted: null
+        LastRunCompleted: null,
+        UpdatedAt: new Date().toISOString()
       }, {
         onConflict: 'SyncType'
       });
@@ -230,3 +302,8 @@ export async function resetSyncState(syncType) {
     }
   });
 }
+// [7.5] End
+
+// ===============================================================================================
+// [7] END
+// ===============================================================================================
