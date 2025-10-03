@@ -6,7 +6,7 @@
 // ===============================================================================================
 
 import { fetchPropertyCount, fetchPropertyBatch, fetchMedia, fetchRooms, fetchOpenHouse } from '../services/api.js';
-import { upsertProperty, upsertMedia, upsertRooms, upsertOpenHouse, getSyncState, updateSyncState } from '../db/client.js';
+import { upsertProperty, upsertMedia, upsertRooms, upsertOpenHouse, getSyncState, updateSyncState, completeSyncState, failSyncState } from '../db/client.js';
 import { mapProperty } from '../mappers/property.js';
 import { mapMedia } from '../mappers/media.js';
 import { mapRooms } from '../mappers/rooms.js';
@@ -55,20 +55,37 @@ export async function runSequentialSync(options = {}) {
     Logger.info(`Resuming from: ${state.LastTimestamp} | Key: ${state.LastKey}`);
     // [2.1] End
 
-    // [2.2] Fetch total count for progress tracking
-    const totalCount = await fetchPropertyCount(syncType, state.LastTimestamp, state.LastKey);
-    Logger.info(`Total records available: ${totalCount.toLocaleString()}`);
+    // [2.2] Set status to running and track start time
+    await updateSyncState({
+      SyncType: syncType,
+      LastTimestamp: state.LastTimestamp,
+      LastKey: state.LastKey,
+      Status: 'running',
+      LastRunStarted: new Date().toISOString()
+    });
+    Logger.info(`Status set to RUNNING`);
     // [2.2] End
 
-    // [2.3] Run sync loop
-    await syncLoop(syncType, state, totalCount, limit);
+    // [2.3] Fetch total count for progress tracking
+    const totalCount = await fetchPropertyCount(syncType, state.LastTimestamp, state.LastKey);
+    Logger.info(`Total records available: ${totalCount.toLocaleString()}`);
     // [2.3] End
 
-    Logger.success(`${syncType} sync completed successfully`);
+    // [2.4] Run sync loop
+    const processedCount = await syncLoop(syncType, state, totalCount, limit);
+    // [2.4] End
+
+    // [2.5] Mark sync as completed
+    await completeSyncState(syncType, processedCount);
+    Logger.success(`${syncType} sync completed successfully - ${processedCount.toLocaleString()} properties processed`);
+    // [2.5] End
 
   } catch (error) {
+    // [2.6] Mark sync as failed
+    await failSyncState(syncType, error.message);
     Logger.error(`Sync failed: ${error.message}`);
     throw error;
+    // [2.6] End
   }
 }
 
@@ -195,6 +212,10 @@ async function syncLoop(syncType, state, totalCount, limit) {
   // [3.4] Final coverage report
   logCoverageReport(processedCount, coverageStats);
   // [3.4] End
+
+  // [3.5] Return total processed count
+  return processedCount;
+  // [3.5] End
 }
 
 // ===============================================================================================

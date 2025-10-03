@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { SequentialSync } from './sync/sequential.js';
+import { runSequentialSync } from './sync/sequential.js';
 import { parseArgs } from './utils/args.js';
 
 dotenv.config({ path: './environment.env' });

@@ -1,19 +1,85 @@
 // ===============================================================================================
 // COMBINED SYNC ORCHESTRATOR (IDX + VOW)
 // ===============================================================================================
-// Runs both IDX and VOW syncs sequentially with progress tracking and database status
+// Runs IDX and/or VOW syncs with flexible command-line options
+// Usage:
+//   node sync-all.js                    -> Sync both IDX and VOW (full)
+//   node sync-all.js idx                -> Sync only IDX
+//   node sync-all.js vow                -> Sync only VOW
+//   node sync-all.js idx vow            -> Sync both (same as no args)
+//   node sync-all.js -10                -> Sync both with limit=10
+//   node sync-all.js idx -50            -> Sync only IDX with limit=50
+//   node sync-all.js vow -100           -> Sync only VOW with limit=100
+//   node sync-all.js incremental        -> Sync both incrementally (from last checkpoint)
+//   node sync-all.js --reset            -> Reset and sync both from start
 // ===============================================================================================
 
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { runSequentialSync } from './sync/sequential.js';
-import { parseArgs } from './utils/args.js';
 import { fetchPropertyCount } from './services/api.js';
 
 dotenv.config({ path: './environment.env' });
 
 // ===============================================================================================
-// [1] HELPER FUNCTION - GET EXISTING DATABASE RECORDS
+// [1] PARSE COMMAND LINE ARGUMENTS
+// ===============================================================================================
+
+function parseCustomArgs() {
+  const args = process.argv.slice(2);
+  
+  const config = {
+    syncIdx: false,
+    syncVow: false,
+    limit: null,
+    reset: false,
+    incremental: false
+  };
+
+  // If no args, sync both
+  if (args.length === 0) {
+    config.syncIdx = true;
+    config.syncVow = true;
+    return config;
+  }
+
+  for (const arg of args) {
+    const lower = arg.toLowerCase();
+    
+    // Sync type flags
+    if (lower === 'idx') {
+      config.syncIdx = true;
+    } else if (lower === 'vow') {
+      config.syncVow = true;
+    }
+    // Limit flags
+    else if (lower.match(/^-\d+$/)) {
+      config.limit = parseInt(lower.substring(1));
+    }
+    // Mode flags
+    else if (lower === 'incremental') {
+      config.incremental = true;
+    } else if (lower === '--reset') {
+      config.reset = true;
+    }
+  }
+
+  // If neither IDX nor VOW specified, sync both
+  if (!config.syncIdx && !config.syncVow) {
+    config.syncIdx = true;
+    config.syncVow = true;
+  }
+
+  return config;
+}
+
+// ===============================================================================================
+// [1] END
+// ===============================================================================================
+
+
+// ===============================================================================================
+// [2] HELPER FUNCTION - GET EXISTING DATABASE RECORDS
 // ===============================================================================================
 
 async function getExistingRecordCount() {
@@ -30,69 +96,84 @@ async function getExistingRecordCount() {
 }
 
 // ===============================================================================================
-// [1] END
+// [2] END
 // ===============================================================================================
 
 
 // ===============================================================================================
-// [2] MAIN FUNCTION
+// [3] MAIN FUNCTION
 // ===============================================================================================
 
 async function main() {
-  const args = parseArgs();
+  const config = parseCustomArgs();
   
   console.log('========================================');
-  console.log('TRREB Complete Sync (IDX + VOW)');
+  console.log('TRREB Sync Service');
+  console.log('========================================');
+  console.log(`Mode: ${config.incremental ? 'INCREMENTAL' : 'FULL'}`);
+  console.log(`Syncing: ${config.syncIdx ? 'IDX' : ''}${config.syncIdx && config.syncVow ? ' + ' : ''}${config.syncVow ? 'VOW' : ''}`);
+  console.log(`Limit: ${config.limit ? config.limit.toLocaleString() : 'None (complete sync)'}`);
+  console.log(`Reset: ${config.reset ? 'YES' : 'NO'}`);
   console.log('========================================\n');
   
   const totalStart = Date.now();
   
   try {
-    // [2.1] Fetch counts for both IDX and VOW upfront
+    // [3.1] Fetch counts upfront
     console.log('>>> Fetching total counts...\n');
     
-    const idxCount = await fetchPropertyCount('IDX', '2024-01-01T00:00:00Z', '0');
-    const vowCount = await fetchPropertyCount('VOW', '2024-01-01T00:00:00Z', '0');
-    const totalCount = idxCount + vowCount;
+    let idxCount = 0;
+    let vowCount = 0;
     
-    console.log(`IDX Properties: ${idxCount.toLocaleString()}`);
-    console.log(`VOW Properties: ${vowCount.toLocaleString()}`);
+    if (config.syncIdx) {
+      idxCount = await fetchPropertyCount('IDX', '2024-01-01T00:00:00Z', '0');
+      console.log(`IDX Properties: ${idxCount.toLocaleString()}`);
+    }
+    
+    if (config.syncVow) {
+      vowCount = await fetchPropertyCount('VOW', '2024-01-01T00:00:00Z', '0');
+      console.log(`VOW Properties: ${vowCount.toLocaleString()}`);
+    }
+    
+    const totalCount = idxCount + vowCount;
     console.log(`TOTAL Properties: ${totalCount.toLocaleString()}`);
     
-    // [2.2] Get existing database count
+    // [3.2] Get existing database count
     const existingRecords = await getExistingRecordCount();
     console.log(`\nAlready in database: ${existingRecords.toLocaleString()}`);
     console.log(`Remaining to sync: ${(totalCount - existingRecords).toLocaleString()}\n`);
-    // [2.2] End
+    // [3.2] End
     
-    // [2.3] Sync IDX
-    console.log('>>> Starting IDX Sync...\n');
-    await runSequentialSync({
-      limit: args.limit,
-      syncType: 'IDX',
-      reset: args.reset
-    });
+    // [3.3] Sync IDX (if requested)
+    if (config.syncIdx) {
+      console.log('>>> Starting IDX Sync...\n');
+      await runSequentialSync({
+        limit: config.limit,
+        syncType: 'IDX',
+        reset: config.reset
+      });
+      console.log('\n>>> IDX Sync Complete!\n');
+    }
+    // [3.3] End
     
-    console.log('\n>>> IDX Sync Complete!\n');
-    // [2.3] End
+    // [3.4] Sync VOW (if requested)
+    if (config.syncVow) {
+      console.log('>>> Starting VOW Sync...\n');
+      await runSequentialSync({
+        limit: config.limit,
+        syncType: 'VOW',
+        reset: config.reset
+      });
+      console.log('\n>>> VOW Sync Complete!\n');
+    }
+    // [3.4] End
     
-    // [2.4] Sync VOW
-    console.log('>>> Starting VOW Sync...\n');
-    await runSequentialSync({
-      limit: args.limit,
-      syncType: 'VOW',
-      reset: args.reset
-    });
-    
-    console.log('\n>>> VOW Sync Complete!\n');
-    // [2.4] End
-    
-    // [2.5] Final summary
+    // [3.5] Final summary
     const totalTime = ((Date.now() - totalStart) / 1000 / 60).toFixed(2);
     const finalCount = await getExistingRecordCount();
     
     console.log('========================================');
-    console.log('COMBINED SYNC COMPLETE');
+    console.log('SYNC COMPLETE');
     console.log('========================================');
     console.log(`Total Records in Database: ${finalCount.toLocaleString()}`);
     console.log(`Records Added This Run: ${(finalCount - existingRecords).toLocaleString()}`);
@@ -100,7 +181,7 @@ async function main() {
     console.log('========================================\n');
     
     console.log('SUCCESS: All syncs completed!');
-    // [2.5] End
+    // [3.5] End
     
   } catch (error) {
     console.error('\nSYNC FAILED');
@@ -111,7 +192,7 @@ async function main() {
 }
 
 // ===============================================================================================
-// [2] END
+// [3] END
 // ===============================================================================================
 
 main();
