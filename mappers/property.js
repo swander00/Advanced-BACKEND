@@ -11,7 +11,7 @@ const ALLOWED_PROPERTY_FIELDS = [
   'SystemModificationTimestamp', 'OriginalEntryTimestamp', 'SoldConditionalEntryTimestamp',
   'SoldEntryTimestamp', 'SuspendedEntryTimestamp', 'TerminatedEntryTimestamp',
   'CloseDate', 'ConditionalExpiryDate', 'PurchaseContractDate', 'SuspendedDate',
-  'TerminatedDate', 'UnavailableDate', 'Cooling', 'Sewer', 'Basement',
+  'TerminatedDate', 'UnavailableDate', 'ExpirationDate', 'Cooling', 'Sewer', 'Basement',
   'BasementEntrance', 'ExteriorFeatures', 'InteriorFeatures', 'PoolFeatures',
   'PropertyFeatures', 'HeatType', 'FireplaceYN', 'LivingAreaRange', 
   'WaterfrontYN', 'PossessionType', 'CoveredSpaces', 'ParkingSpaces',
