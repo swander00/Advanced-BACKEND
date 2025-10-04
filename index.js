@@ -16,7 +16,18 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(express.json());
-app.use(express.static('public')); // Serve static files from 'public' folder
+app.use(express.static('public'));
+
+// CORS - Allow dashboard to call API from any origin
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // [1.1] Serve Dashboard
 app.get('/', (req, res) => {
@@ -60,14 +71,10 @@ async function runSyncInBackground(args) {
     console.log(`\nTRREB Sequential Sync Starting`);
     console.log(`Mode: ${args.syncType} | Limit: ${args.limit || 'none'}\n`);
 
-    const sync = new SequentialSync();
-    const results = await sync.run(args);
+    // Use the imported function directly
+    await runSequentialSync(args);
     
-    if (results.mediaCoverage >= 95) {
-      console.log('SUCCESS: Excellent media coverage achieved!');
-    } else {
-      console.log('WARNING: Media coverage below 95%');
-    }
+    console.log('SUCCESS: Sync completed!');
   } catch (error) {
     console.error('\nERROR: Sync failed');
     console.error(error.message);
@@ -84,17 +91,17 @@ async function runSyncInBackground(args) {
 const PORT = process.env.PORT || 8080;
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 TRREB Sync Service running on port ${PORT}`);
-  console.log(`📊 Dashboard: http://localhost:${PORT}`);
-  console.log(`💚 Health: http://localhost:${PORT}/health`);
+  console.log(`TRREB Sync Service running on port ${PORT}`);
+  console.log(`Dashboard: http://localhost:${PORT}`);
+  console.log(`Health: http://localhost:${PORT}/health`);
   
   // Check if running as cron or manual mode
   const args = parseArgs();
   if (process.env.RUN_SYNC_ON_START === 'true') {
-    console.log('\n⏰ Auto-sync enabled - starting initial sync...');
+    console.log('\nAuto-sync enabled - starting initial sync...');
     runSyncInBackground(args);
   } else {
-    console.log('\n⏸️  Waiting for manual trigger or cron schedule...');
+    console.log('\nWaiting for manual trigger or cron schedule...');
   }
 });
 
