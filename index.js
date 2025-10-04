@@ -56,8 +56,12 @@ app.post('/trigger-sync', async (req, res) => {
     timestamp: new Date().toISOString()
   });
   
-  // Run sync in background (don't await)
-  runSyncInBackground({ syncType: type, reset, limit });
+  // Handle ALL type with sequential execution
+  if (type === 'ALL') {
+    runSyncAllInBackground({ reset, limit });
+  } else {
+    runSyncInBackground({ syncType: type, reset, limit });
+  }
 });
 
 // [1] END
@@ -66,17 +70,58 @@ app.post('/trigger-sync', async (req, res) => {
 // [2] SYNC EXECUTION FUNCTIONS
 // ===============================================================================================
 
+// Single sync type execution
 async function runSyncInBackground(args) {
   try {
     console.log(`\nTRREB Sequential Sync Starting`);
     console.log(`Mode: ${args.syncType} | Limit: ${args.limit || 'none'}\n`);
 
-    // Use the imported function directly
     await runSequentialSync(args);
     
-    console.log('SUCCESS: Sync completed!');
+    console.log(`SUCCESS: ${args.syncType} sync completed!`);
   } catch (error) {
-    console.error('\nERROR: Sync failed');
+    console.error(`\nERROR: ${args.syncType} sync failed`);
+    console.error(error.message);
+    if (error.stack) console.error(error.stack);
+  }
+}
+
+// Combined IDX + VOW execution (sequential)
+async function runSyncAllInBackground(args) {
+  const startTime = Date.now();
+  
+  try {
+    console.log('\n========================================');
+    console.log('COMBINED SYNC (IDX + VOW)');
+    console.log('========================================');
+    console.log(`Limit: ${args.limit || 'None'} | Reset: ${args.reset}\n`);
+
+    // Run IDX first
+    console.log('>>> Starting IDX Sync...\n');
+    await runSequentialSync({
+      syncType: 'IDX',
+      reset: args.reset,
+      limit: args.limit
+    });
+    console.log('\n>>> IDX Sync Complete!\n');
+
+    // Then run VOW
+    console.log('>>> Starting VOW Sync...\n');
+    await runSequentialSync({
+      syncType: 'VOW',
+      reset: args.reset,
+      limit: args.limit
+    });
+    console.log('\n>>> VOW Sync Complete!\n');
+
+    const totalTime = ((Date.now() - startTime) / 1000 / 60).toFixed(2);
+    console.log('========================================');
+    console.log('COMBINED SYNC COMPLETE');
+    console.log(`Total Time: ${totalTime} minutes`);
+    console.log('========================================\n');
+    
+  } catch (error) {
+    console.error('\nERROR: Combined sync failed');
     console.error(error.message);
     if (error.stack) console.error(error.stack);
   }
