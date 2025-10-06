@@ -122,6 +122,9 @@ CREATE TABLE "Property" (
     "Furnished" TEXT,
     "RentIncludes" TEXT[],
 
+    -- Virtual Tour Information
+    "VirtualTourURLUnbranded" TEXT,
+
     -- Audit Fields
     "CreatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL,
     "UpdatedAt" TIMESTAMPTZ DEFAULT NOW() NOT NULL
@@ -175,8 +178,12 @@ CREATE TABLE "PropertyRooms" (
     "RoomLength" NUMERIC,
     "RoomWidth" NUMERIC,
     "RoomDescription" TEXT,
-    "RoomFeatures" TEXT[],
-    "RoomDimensions" TEXT,
+    "RoomAreaUnits" TEXT,
+    "RoomFeature1" TEXT,
+    "RoomFeature2" TEXT,
+    "RoomFeature3" TEXT,
+    "CombinedFeatures" TEXT,
+    "RoomMeasurements" TEXT,
 
     "ModificationTimestamp" TIMESTAMPTZ,
 
@@ -297,6 +304,91 @@ CREATE TRIGGER "update_syncstate_updated_at" BEFORE UPDATE ON "SyncState"
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ===============================================================
+-- Room Feature Triggers
+-- ===============================================================
+
+-- Trigger function for CombinedFeatures
+CREATE OR REPLACE FUNCTION update_combined_features()
+RETURNS TRIGGER AS $$
+DECLARE
+    features TEXT[];
+    clean_feature TEXT;
+BEGIN
+    features := ARRAY[]::TEXT[];
+    
+    IF NEW."RoomFeature1" IS NOT NULL THEN
+        clean_feature := TRIM(BOTH '"[]' FROM NEW."RoomFeature1");
+        IF clean_feature != '' THEN
+            features := array_append(features, clean_feature);
+        END IF;
+    END IF;
+    
+    IF NEW."RoomFeature2" IS NOT NULL THEN
+        clean_feature := TRIM(BOTH '"[]' FROM NEW."RoomFeature2");
+        IF clean_feature != '' THEN
+            features := array_append(features, clean_feature);
+        END IF;
+    END IF;
+    
+    IF NEW."RoomFeature3" IS NOT NULL THEN
+        clean_feature := TRIM(BOTH '"[]' FROM NEW."RoomFeature3");
+        IF clean_feature != '' THEN
+            features := array_append(features, clean_feature);
+        END IF;
+    END IF;
+    
+    IF array_length(features, 1) > 0 THEN
+        NEW."CombinedFeatures" := array_to_string(features, ', ');
+    ELSE
+        NEW."CombinedFeatures" := NULL;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger function for RoomMeasurements
+CREATE OR REPLACE FUNCTION update_room_measurements()
+RETURNS TRIGGER AS $$
+DECLARE
+    result TEXT := '';
+BEGIN
+    IF NEW."RoomLength" IS NOT NULL THEN
+        result := NEW."RoomLength"::TEXT;
+        
+        IF NEW."RoomWidth" IS NOT NULL THEN
+            result := result || 'x' || NEW."RoomWidth"::TEXT;
+        END IF;
+        
+        IF NEW."RoomAreaUnits" IS NOT NULL AND result != '' THEN
+            result := result || ' ' || NEW."RoomAreaUnits";
+        END IF;
+    END IF;
+    
+    IF result = '' THEN
+        NEW."RoomMeasurements" := NULL;
+    ELSE
+        NEW."RoomMeasurements" := result;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create triggers for room features
+CREATE TRIGGER "trigger_update_combined_features"
+    BEFORE INSERT OR UPDATE OF "RoomFeature1", "RoomFeature2", "RoomFeature3"
+    ON "PropertyRooms"
+    FOR EACH ROW
+    EXECUTE FUNCTION update_combined_features();
+
+CREATE TRIGGER "trigger_update_room_measurements"
+    BEFORE INSERT OR UPDATE OF "RoomLength", "RoomWidth", "RoomAreaUnits"
+    ON "PropertyRooms"
+    FOR EACH ROW
+    EXECUTE FUNCTION update_room_measurements();
+
+-- ===============================================================
 -- Comments
 -- ===============================================================
 COMMENT ON TABLE "Property" IS 'Real estate property listings from TRREB RESO Web API';
@@ -307,3 +399,10 @@ COMMENT ON TABLE "SyncState" IS 'Tracks sync progress for resume support';
 COMMENT ON COLUMN "SyncState"."SyncType" IS 'IDX, VOW, IDX_INCREMENTAL, etc.';
 COMMENT ON COLUMN "SyncState"."LastTimestamp" IS 'Last ModificationTimestamp processed';
 COMMENT ON COLUMN "SyncState"."LastKey" IS 'Last ListingKey processed at that timestamp';
+
+-- Room feature columns
+COMMENT ON COLUMN "PropertyRooms"."RoomFeature1" IS 'Room Feature 1 - String (List, Single)';
+COMMENT ON COLUMN "PropertyRooms"."RoomFeature2" IS 'Room Feature 2 - String (List, Single)';
+COMMENT ON COLUMN "PropertyRooms"."RoomFeature3" IS 'Room Feature 3 - String (List, Single)';
+COMMENT ON COLUMN "PropertyRooms"."CombinedFeatures" IS 'Combined room features from RoomFeature1-3 (auto-populated by trigger)';
+COMMENT ON COLUMN "PropertyRooms"."RoomMeasurements" IS 'Combined room measurements from length, width, and units (auto-populated by trigger)';

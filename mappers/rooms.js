@@ -1,7 +1,7 @@
 const ALLOWED_ROOMS_FIELDS = [
   'RoomKey', 'ListingKey', 'RoomType', 'RoomLevel', 'RoomLength', 
-  'RoomWidth', 'RoomDescription', 'RoomFeatures', 'RoomDimensions',
-  'ModificationTimestamp'
+  'RoomWidth', 'RoomDescription', 'RoomAreaUnits', 'RoomFeature1', 
+  'RoomFeature2', 'RoomFeature3', 'ModificationTimestamp'
 ];
 
 const NUMERIC_FIELDS = ['RoomLength', 'RoomWidth'];
